@@ -1,0 +1,291 @@
+––– block: ../base/start-searchd –––
+––– input –––
+mysql -h0 -P9306 -e "DROP TABLE IF EXISTS test_prepare"; echo $?
+––– output –––
+0
+––– input –––
+mysql -h0 -P9306 -e "CREATE TABLE test_prepare (id BIGINT, title TEXT, price FLOAT, tags MULTI, status INTEGER, info JSON)"; echo $?
+––– output –––
+0
+––– input –––
+mysql -h0 -P9306 -e "INSERT INTO test_prepare VALUES (1, 'hello world', 10.5, (1,2,3), 1, '{\"category\":\"electronics\"}'), (2, 'test document', 20.0, (2,3,4), 2, '{\"category\":\"books\"}'), (3, 'another test', 15.5, (3,4,5), 1, '{\"category\":\"electronics\"}'), (4, 'prepare statement test', 25.0, (1,4,5), 3, '{\"category\":\"software\"}'), (5, 'execute test', 30.0, (2,5,6), 2, '{\"category\":\"books\"}')"; echo $?
+––– output –––
+0
+
+# Test basic PREPARE statement
+––– input –––
+mysql -h0 -P9306 -e "PREPARE basic_select FROM 'SELECT * FROM test_prepare WHERE id = 1'"; echo $?
+––– output –––
+0
+
+# Test EXECUTE without parameters
+––– input –––
+mysql -h0 -P9306 -e "EXECUTE basic_select"
+––– output –––
+id	title	price	tags	status	info
+1	hello world	10.5	1,2,3	1	{"category":"electronics"}
+
+# Test PREPARE with positional parameters
+––– input –––
+mysql -h0 -P9306 -e "PREPARE select_by_id FROM 'SELECT * FROM test_prepare WHERE id = ?'"; echo $?
+––– output –––
+0
+
+# Test EXECUTE with user variables
+––– input –––
+mysql -h0 -P9306 -e "SET @id1 = 2; EXECUTE select_by_id USING @id1"
+––– output –––
+id	title	price	tags	status	info
+2	test document	20	2,3,4	2	{"category":"books"}
+
+# Test multiple parameters
+––– input –––
+mysql -h0 -P9306 -e "PREPARE range_select FROM 'SELECT * FROM test_prepare WHERE id >= ? AND id <= ? ORDER BY id'"; echo $?
+––– output –––
+0
+
+––– input –––
+mysql -h0 -P9306 -e "SET @min_id = 2; SET @max_id = 4; EXECUTE range_select USING @min_id, @max_id"
+––– output –––
+id	title	price	tags	status	info
+2	test document	20	2,3,4	2	{"category":"books"}
+3	another test	15.5	3,4,5	1	{"category":"electronics"}
+4	prepare statement test	25	1,4,5	3	{"category":"software"}
+
+# Test PREPARE with text search
+––– input –––
+mysql -h0 -P9306 -e "PREPARE text_search FROM 'SELECT * FROM test_prepare WHERE MATCH(?) ORDER BY id'"; echo $?
+––– output –––
+0
+
+––– input –––
+mysql -h0 -P9306 -e "SET @search_text = 'test'; EXECUTE text_search USING @search_text"
+––– output –––
+id	title	price	tags	status	info
+2	test document	20	2,3,4	2	{"category":"books"}
+3	another test	15.5	3,4,5	1	{"category":"electronics"}
+4	prepare statement test	25	1,4,5	3	{"category":"software"}
+5	execute test	30	2,5,6	2	{"category":"books"}
+
+# Test PREPARE with float parameter
+––– input –––
+mysql -h0 -P9306 -e "PREPARE price_filter FROM 'SELECT id, title, price FROM test_prepare WHERE price > ? ORDER BY price'"; echo $?
+––– output –––
+0
+
+––– input –––
+mysql -h0 -P9306 -e "SET @min_price = 15.0; EXECUTE price_filter USING @min_price"
+––– output –––
+id	title	price
+3	another test	15.5
+2	test document	20
+4	prepare statement test	25
+5	execute test	30
+
+# Test PREPARE with INSERT statement
+––– input –––
+mysql -h0 -P9306 -e "PREPARE insert_stmt FROM 'INSERT INTO test_prepare VALUES (?, ?, ?, ?, ?, ?)'"; echo $?
+––– output –––
+0
+
+––– input –––
+mysql -h0 -P9306 -e "SET @new_id = 6; SET @new_title = 'prepared insert'; SET @new_price = 35.5; SET @new_tags = '(7,8,9)'; SET @new_status = 1; SET @new_info = '{\"category\":\"new\"}'; EXECUTE insert_stmt USING @new_id, @new_title, @new_price, @new_tags, @new_status, @new_info"; echo $?
+––– output –––
+0
+
+# Verify INSERT worked
+––– input –––
+mysql -h0 -P9306 -e "SELECT * FROM test_prepare WHERE id = 6"
+––– output –––
+id	title	price	tags	status	info
+6	prepared insert	35.5	7,8,9	1	{"category":"new"}
+
+# Test PREPARE with UPDATE statement
+––– input –––
+mysql -h0 -P9306 -e "PREPARE update_price FROM 'UPDATE test_prepare SET price = ? WHERE id = ?'"; echo $?
+––– output –––
+0
+
+––– input –––
+mysql -h0 -P9306 -e "SET @updated_price = 50.0; SET @update_id = 1; EXECUTE update_price USING @updated_price, @update_id"; echo $?
+––– output –––
+0
+
+# Verify UPDATE worked
+––– input –––
+mysql -h0 -P9306 -e "SELECT id, title, price FROM test_prepare WHERE id = 1"
+––– output –––
+id	title	price
+1	hello world	50
+
+# Test PREPARE with DELETE statement
+––– input –––
+mysql -h0 -P9306 -e "PREPARE delete_stmt FROM 'DELETE FROM test_prepare WHERE id = ?'"; echo $?
+––– output –––
+0
+
+––– input –––
+mysql -h0 -P9306 -e "SET @delete_id = 3; EXECUTE delete_stmt USING @delete_id"; echo $?
+––– output –––
+0
+
+# Verify DELETE worked
+––– input –––
+mysql -h0 -P9306 -e "SELECT COUNT(*) as cnt FROM test_prepare"
+––– output –––
+cnt
+5
+
+# Test DEALLOCATE
+––– input –––
+mysql -h0 -P9306 -e "DEALLOCATE PREPARE basic_select"; echo $?
+––– output –––
+0
+
+––– input –––
+mysql -h0 -P9306 -e "DEALLOCATE PREPARE select_by_id"; echo $?
+––– output –––
+0
+
+# Test error: executing deallocated statement
+––– input –––
+mysql -h0 -P9306 -e "EXECUTE basic_select" 2>&1 | grep -o "Prepared statement .* not found"
+––– output –––
+Prepared statement 'basic_select' not found
+
+# Test error: preparing statement with same name
+––– input –––
+mysql -h0 -P9306 -e "PREPARE test_dup FROM 'SELECT 1'"; echo $?
+––– output –––
+0
+
+––– input –––
+mysql -h0 -P9306 -e "PREPARE test_dup FROM 'SELECT 2'" 2>&1 | grep -o "Prepared statement .* already exists"
+––– output –––
+Prepared statement 'test_dup' already exists
+
+# Clean up duplicate test
+––– input –––
+mysql -h0 -P9306 -e "DEALLOCATE PREPARE test_dup"; echo $?
+––– output –––
+0
+
+# Test error: deallocating non-existent statement
+––– input –––
+mysql -h0 -P9306 -e "DEALLOCATE PREPARE non_existent" 2>&1 | grep -o "Prepared statement .* not found"
+––– output –––
+Prepared statement 'non_existent' not found
+
+# Test PREPARE with complex query
+––– input –––
+mysql -h0 -P9306 -e "PREPARE complex_query FROM 'SELECT id, title, price, WEIGHT() as w FROM test_prepare WHERE MATCH(?) AND price > ? ORDER BY w DESC, price ASC LIMIT ?'"; echo $?
+––– output –––
+0
+
+––– input –––
+mysql -h0 -P9306 -e "SET @search = 'test'; SET @min_price = 10.0; SET @limit = 3; EXECUTE complex_query USING @search, @min_price, @limit"
+––– output –––
+id	title	price	w
+3	another test	15.5	1500
+2	test document	20	1500
+4	prepare statement test	25	1500
+
+––– input –––
+mysql -h0 -P9306 -e "DEALLOCATE PREPARE complex_query"; echo $?
+––– output –––
+0
+
+# Test prepared statement with GROUP BY
+––– input –––
+mysql -h0 -P9306 -e "PREPARE group_query FROM 'SELECT status, COUNT(*) as cnt FROM test_prepare WHERE price > ? GROUP BY status ORDER BY status'"; echo $?
+––– output –––
+0
+
+––– input –––
+mysql -h0 -P9306 -e "SET @threshold = 15.0; EXECUTE group_query USING @threshold"
+––– output –––
+status	cnt
+1	1
+2	2
+3	1
+
+––– input –––
+mysql -h0 -P9306 -e "DEALLOCATE PREPARE group_query"; echo $?
+––– output –––
+0
+
+# Test with JSON operations
+––– input –––
+mysql -h0 -P9306 -e "PREPARE json_filter FROM 'SELECT id, title, info.category FROM test_prepare WHERE info.category = ?'"; echo $?
+––– output –––
+0
+
+––– input –––
+mysql -h0 -P9306 -e "SET @category = 'books'; EXECUTE json_filter USING @category"
+––– output –––
+id	title	info.category
+2	test document	books
+5	execute test	books
+
+––– input –––
+mysql -h0 -P9306 -e "DEALLOCATE PREPARE json_filter"; echo $?
+––– output –––
+0
+
+# Test multiple executions of same prepared statement
+––– input –––
+mysql -h0 -P9306 -e "PREPARE multi_exec FROM 'SELECT * FROM test_prepare WHERE status = ?'"; echo $?
+––– output –––
+0
+
+––– input –––
+mysql -h0 -P9306 -e "SET @status1 = 1; EXECUTE multi_exec USING @status1" | wc -l
+––– output –––
+3
+
+––– input –––
+mysql -h0 -P9306 -e "SET @status2 = 2; EXECUTE multi_exec USING @status2" | wc -l
+––– output –––
+3
+
+––– input –––
+mysql -h0 -P9306 -e "DEALLOCATE PREPARE multi_exec"; echo $?
+––– output –––
+0
+
+# Clean up remaining prepared statements
+––– input –––
+mysql -h0 -P9306 -e "DEALLOCATE PREPARE range_select"; echo $?
+––– output –––
+0
+
+––– input –––
+mysql -h0 -P9306 -e "DEALLOCATE PREPARE text_search"; echo $?
+––– output –––
+0
+
+––– input –––
+mysql -h0 -P9306 -e "DEALLOCATE PREPARE price_filter"; echo $?
+––– output –––
+0
+
+––– input –––
+mysql -h0 -P9306 -e "DEALLOCATE PREPARE insert_stmt"; echo $?
+––– output –––
+0
+
+––– input –––
+mysql -h0 -P9306 -e "DEALLOCATE PREPARE update_price"; echo $?
+––– output –––
+0
+
+––– input –––
+mysql -h0 -P9306 -e "DEALLOCATE PREPARE delete_stmt"; echo $?
+––– output –––
+0
+
+# Clean up table
+––– input –––
+mysql -h0 -P9306 -e "DROP TABLE test_prepare"; echo $?
+––– output –––
+0

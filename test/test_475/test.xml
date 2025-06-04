@@ -1,0 +1,202 @@
+<test>
+<name>PREPARE/EXECUTE/DEALLOCATE statements</name>
+
+<requires><force-rt/></requires>
+<skip_indexer/>
+
+<config>
+searchd
+{
+	<searchd_settings/>
+    data_dir = <data_path/> 
+}
+</config>
+
+<queries>
+
+<!-- Create test table -->
+<sphinxql>
+CREATE TABLE test_prepare (id bigint, title text, price float, tags multi);
+INSERT INTO test_prepare VALUES 
+    (1, 'hello world', 10.5, (1,2,3)),
+    (2, 'test document', 20.0, (2,3,4)),
+    (3, 'another test', 15.5, (3,4,5)),
+    (4, 'prepare statement test', 25.0, (1,4,5)),
+    (5, 'execute test', 30.0, (2,5,6));
+</sphinxql>
+
+<!-- Test basic PREPARE statement -->
+<sphinxql>
+PREPARE basic_select FROM 'SELECT * FROM test_prepare WHERE id = 1';
+</sphinxql>
+
+<!-- Test EXECUTE without parameters -->
+<sphinxql>
+EXECUTE basic_select;
+</sphinxql>
+
+<!-- Test PREPARE with positional parameters -->
+<sphinxql>
+PREPARE select_by_id FROM 'SELECT * FROM test_prepare WHERE id = ?';
+</sphinxql>
+
+<!-- Test EXECUTE with user variables -->
+<sphinxql>
+SET @id1 = 2;
+EXECUTE select_by_id USING @id1;
+</sphinxql>
+
+<!-- Test multiple parameters -->
+<sphinxql>
+PREPARE range_select FROM 'SELECT * FROM test_prepare WHERE id >= ? AND id <= ? ORDER BY id';
+</sphinxql>
+
+<sphinxql>
+SET @min_id = 2;
+SET @max_id = 4;
+EXECUTE range_select USING @min_id, @max_id;
+</sphinxql>
+
+<!-- Test PREPARE with text search -->
+<sphinxql>
+PREPARE text_search FROM 'SELECT * FROM test_prepare WHERE MATCH(?)';
+</sphinxql>
+
+<sphinxql>
+SET @search_text = 'test';
+EXECUTE text_search USING @search_text;
+</sphinxql>
+
+<!-- Test PREPARE with float parameter -->
+<sphinxql>
+PREPARE price_filter FROM 'SELECT * FROM test_prepare WHERE price > ? ORDER BY price';
+</sphinxql>
+
+<sphinxql>
+SET @min_price = 15.0;
+EXECUTE price_filter USING @min_price;
+</sphinxql>
+
+<!-- Test PREPARE with INSERT statement -->
+<sphinxql>
+PREPARE insert_stmt FROM 'INSERT INTO test_prepare VALUES (?, ?, ?, ?)';
+</sphinxql>
+
+<sphinxql>
+SET @new_id = 6;
+SET @new_title = 'prepared insert';
+SET @new_price = 35.5;
+SET @new_tags = '(7,8,9)';
+EXECUTE insert_stmt USING @new_id, @new_title, @new_price, @new_tags;
+</sphinxql>
+
+<!-- Verify INSERT worked -->
+<sphinxql>
+SELECT * FROM test_prepare WHERE id = 6;
+</sphinxql>
+
+<!-- Test PREPARE with UPDATE statement -->
+<sphinxql>
+PREPARE update_price FROM 'UPDATE test_prepare SET price = ? WHERE id = ?';
+</sphinxql>
+
+<sphinxql>
+SET @updated_price = 50.0;
+SET @update_id = 1;
+EXECUTE update_price USING @updated_price, @update_id;
+</sphinxql>
+
+<!-- Verify UPDATE worked -->
+<sphinxql>
+SELECT id, price FROM test_prepare WHERE id = 1;
+</sphinxql>
+
+<!-- Test PREPARE with DELETE statement -->
+<sphinxql>
+PREPARE delete_stmt FROM 'DELETE FROM test_prepare WHERE id = ?';
+</sphinxql>
+
+<sphinxql>
+SET @delete_id = 3;
+EXECUTE delete_stmt USING @delete_id;
+</sphinxql>
+
+<!-- Verify DELETE worked -->
+<sphinxql>
+SELECT COUNT(*) FROM test_prepare;
+</sphinxql>
+
+<!-- Test DEALLOCATE -->
+<sphinxql>
+DEALLOCATE PREPARE basic_select;
+DEALLOCATE PREPARE select_by_id;
+DEALLOCATE PREPARE range_select;
+DEALLOCATE PREPARE text_search;
+DEALLOCATE PREPARE price_filter;
+DEALLOCATE PREPARE insert_stmt;
+DEALLOCATE PREPARE update_price;
+DEALLOCATE PREPARE delete_stmt;
+</sphinxql>
+
+<!-- Test error: executing deallocated statement -->
+<sphinxql error="yes">
+EXECUTE basic_select;
+</sphinxql>
+
+<!-- Test error: preparing statement with same name -->
+<sphinxql>
+PREPARE test_dup FROM 'SELECT 1';
+</sphinxql>
+
+<sphinxql error="yes">
+PREPARE test_dup FROM 'SELECT 2';
+</sphinxql>
+
+<!-- Clean up duplicate test -->
+<sphinxql>
+DEALLOCATE PREPARE test_dup;
+</sphinxql>
+
+<!-- Test error: deallocating non-existent statement -->
+<sphinxql error="yes">
+DEALLOCATE PREPARE non_existent;
+</sphinxql>
+
+<!-- Test PREPARE with complex query -->
+<sphinxql>
+PREPARE complex_query FROM 'SELECT id, title, price, WEIGHT() as w FROM test_prepare WHERE MATCH(?) AND price > ? ORDER BY w DESC, price ASC LIMIT ?';
+</sphinxql>
+
+<sphinxql>
+SET @search = 'test';
+SET @min_price = 10.0;
+SET @limit = 3;
+EXECUTE complex_query USING @search, @min_price, @limit;
+</sphinxql>
+
+<sphinxql>
+DEALLOCATE PREPARE complex_query;
+</sphinxql>
+
+<!-- Test prepared statement with GROUP BY -->
+<sphinxql>
+PREPARE group_query FROM 'SELECT price, COUNT(*) as cnt FROM test_prepare WHERE price > ? GROUP BY price ORDER BY price';
+</sphinxql>
+
+<sphinxql>
+SET @threshold = 15.0;
+EXECUTE group_query USING @threshold;
+</sphinxql>
+
+<sphinxql>
+DEALLOCATE PREPARE group_query;
+</sphinxql>
+
+<!-- Clean up -->
+<sphinxql>
+DROP TABLE test_prepare;
+</sphinxql>
+
+</queries>
+
+</test>
